@@ -1,0 +1,19 @@
+worker-configuration.d.ts
+  s_16f2cd05354dee::t_91bbefdfa0f53f 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dfa663fedaaaa8e79e3f06ab8c76630f00aa25eb",
+  "prompts": {},
+  "sessions": {
+    "s_16f2cd05354dee": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_097126068ffeFbGxxQcybntZRl",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Brendan Irvine-Broque <birvine-broque@cloudflare.com>"
+    }
+  }
+}
