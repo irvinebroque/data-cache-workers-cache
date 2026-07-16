@@ -80,20 +80,36 @@ can start with a new namespace.
 ## Run
 
 ```sh
+npm install
 npm run dev
+```
+
+Open `http://localhost:8787` to use the interactive Cache Observatory. Its code
+tabs execute read-through, overwrite, key deletion, and tag expiration examples
+and show the internal request trace beside the developer-facing API.
+
+Workers Cache itself runs at Cloudflare's edge. The UI works locally but clearly
+labels cache behavior as unavailable because the local runtime does not emulate
+Workers Cache. Deploy before evaluating actual HIT, overwrite, tiering, or purge
+behavior:
+
+```sh
 npm run deploy
 ```
 
-Workers Cache itself runs at Cloudflare's edge. Deploy before evaluating actual
-HIT, overwrite, tiering, or purge behavior; the current local test runtime does
-not emulate the edge cache.
+Open the deployed URL and run the read-through sample twice. The second run
+should show `Cf-Cache-Status: HIT`, a new App request ID, and the same stored
+DataCache execution ID. Browser sessions receive hashed key and tag namespaces
+so people using the public demo do not overwrite one another's entries.
 
-```sh
-curl https://YOUR-WORKER.workers.dev/
-curl https://YOUR-WORKER.workers.dev/
-curl -X POST https://YOUR-WORKER.workers.dev/revalidate
-curl https://YOUR-WORKER.workers.dev/
-```
+## Code layout
+
+- `src/runtime-cache.ts` is the developer-facing API to read first or extract.
+- `src/data-cache.ts` implements the cache-owning Worker entrypoint.
+- `src/cache-protocol.ts` contains private headers, codecs, validation, and keys.
+- `src/demo-api.ts` maps the executable UI samples to `getCache()` calls.
+- `src/demo-ui.ts` contains the dependency-free interactive UI.
+- `src/index.ts` only composes exports and HTTP routes.
 
 ## Prototype limits
 
