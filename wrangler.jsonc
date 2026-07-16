@@ -7,14 +7,29 @@
 	"name": "data-cache-workers-cache",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-07-15",
+	// Cache API mailboxes require a custom domain. Add a custom-domain route
+	// before deployment; workers.dev is deliberately disabled.
+	"workers_dev": false,
 	"cache": {
 		"enabled": true,
 		"cross_version_cache": true
 	},
 	"exports": {
 		"default": { "type": "worker", "cache": { "enabled": false } },
-		"DataCache": { "type": "worker", "cache": { "enabled": true } }
+		"VinextDataCache": { "type": "worker", "cache": { "enabled": true } }
 	},
+	"ratelimits": [
+		{
+			"name": "DEMO_REQUESTS",
+			"namespace_id": "9743201",
+			"simple": { "limit": 10, "period": 60 }
+		},
+		{
+			"name": "DEMO_PURGES",
+			"namespace_id": "9743202",
+			"simple": { "limit": 2, "period": 60 }
+		}
+	],
 	"observability": {
 		"enabled": true
 	},

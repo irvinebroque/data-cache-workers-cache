@@ -1,132 +1,227 @@
-# Runtime-style data cache with Workers Cache
+# vinext data cache on Workers Cache
 
-This dependency-free prototype implements a Vercel Runtime Cache-shaped API on
-top of **Workers Cache**, without KV and without the lower-level Cache API.
+This prototype implements vinext's complete `CacheHandler` interface with
+**Workers Cache** as the authoritative store. Cloudflare's lower-level Cache API
+is used only as a short-lived, data-center-local mailbox while publishing a
+value; normal reads never use it.
+
+Application code continues to use vinext and Next.js cache APIs:
 
 ```ts
-const cache = getCache(ctx.exports.DataCache);
-
-await cache.set('blog', posts, {
-  ttl: 3600,
-  tags: ['blogs'],
+const response = await fetch('https://api.example.com/posts', {
+  next: { revalidate: 300, tags: ['posts'] },
 });
 
-const cached = await cache.get('blog');
-await cache.delete('blog');
-await cache.expireTag('blogs');
+revalidateTag('posts');
+revalidatePath('/blog');
 ```
 
-## Protocol
+The handler supports fetch cache entries, `unstable_cache`, `"use cache"`, ISR
+pages, route bodies, redirects, images, binary RSC data, logical stale/expiry
+metadata, and tag invalidation.
 
-Workers Cache only stores responses from `GET` and `HEAD` calls, so the
-caller-side facade translates key/value operations into internal `GET`s to the
-cached `DataCache` entrypoint.
+## Why a mailbox exists
 
-- `get(key)` calls `DataCache.fetch()` with a SHA-256 custom `cf.cacheKey`.
-- `set(key, value)` sends JSON in a private Base64 request header.
-- Request `Cache-Control: no-cache` forces a warm entry to revalidate.
-- `DataCache` echoes the supplied value in a cacheable `200` response.
-- A random write ID and the echoed body prevent a stale hit from being reported
-  as a successful write.
-- Every entry receives a hashed key tag, allowing `delete(key)` to purge it.
-- `expireTag(tags)` calls `ctx.cache.purge()` from `DataCache`, because Workers
-  Cache purges are scoped to the entrypoint that owns the cached response.
+Workers Cache only stores responses from `GET` and `HEAD` invocations. A vinext
+`set(key, value)` already has the value, but a cacheable `GET` cannot carry that
+value in its body. Putting it in request headers is size-limited and requires
+Base64 for binary data.
+
+`VinextDataCache.publish()` bridges that gap without making Cache API the data
+store:
 
 ```text
-get(key) ──GET/custom key──> Workers Cache ──HIT──> cached JSON
-                                  │ MISS
-                                  v
-                              DataCache -> 404 no-store
-
-set(key, value) ──GET + no-cache/custom key──> DataCache
-                                                │
-                                                └─200 + max-age + tags
-                                                          │
-                                                          v
-                                                    Workers Cache
+CacheHandler.set()
+  -> binary record in an RPC Response stream
+  -> Cache API mailbox under a random nonce
+  -> no-cache loopback GET using the stable custom key
+  -> VinextDataCache streams the mailbox body as its response
+  -> Workers Cache stores or replaces that response
+  -> nonce-free GET verifies the persisted write ID + SHA-256
+  -> publish deletes the mailbox
 ```
 
-The default Worker uses the facade in the same pattern as Vercel's API:
+The forced revalidation preserves the previous value until Cloudflare accepts
+the replacement and avoids spending Instant Purge quota on normal writes. If
+the persisted write cannot be verified, publication retries briefly and fails
+without deleting another writer's value.
+
+`CacheHandler.get()` only performs the stable cached `GET`:
+
+```text
+App Worker -> Workers Cache HIT -> binary vinext record
+                          MISS -> VinextDataCache -> 404 no-store
+```
+
+No cached value is placed in request headers or query parameters.
+
+## Binary format
+
+Each cached response contains a versioned `VXWC` envelope:
+
+- vinext's `lastModified`, `cacheControl`, stale time, expiry time, and tags
+- JSON metadata for all `IncrementalCacheValue` variants
+- raw frames for `APP_PAGE.rscData`, `APP_ROUTE.body`, and `IMAGE.buffer`
+- a SHA-256 digest and random write ID for publication verification
+
+The prototype caps an encoded record at 2 MiB. Both RPC input and cached reads
+enforce the limit while streaming, before buffering the complete record.
+Physical Workers Cache retention defaults to 30 days and is intentionally
+separate from vinext's logical
+revalidation time, allowing stale entries to remain available for regeneration.
+
+## vinext setup
+
+The Worker entry module must export `VinextDataCache` so the adapter can reach it
+through `ctx.exports`:
 
 ```ts
-let blog = await cache.get('blog');
-if (blog === null) {
-  blog = await fetch('https://api.vercel.app/blog').then((response) => response.json());
-  await cache.set('blog', blog, { ttl: 60, tags: ['blog'] });
-}
+// worker/index.ts
+import handler from 'vinext/server/fetch-handler';
+export { VinextDataCache } from '../src/data-cache';
+
+export default handler;
 ```
 
-## Configuration
+Point vinext's data-cache slot at the runtime factory:
 
-The application entrypoint must remain uncached while `DataCache` is cached:
+```ts
+// vite.config.ts
+import { fileURLToPath } from 'node:url';
+import { defineConfig } from 'vite';
+import vinext from 'vinext';
+
+export default defineConfig({
+  plugins: [
+    vinext({
+      cache: {
+        data: {
+          adapter: fileURLToPath(
+            new URL('./src/workers-cache-handler.ts', import.meta.url),
+          ),
+          options: {
+            appPrefix: 'my-app',
+            storageTtlSeconds: 30 * 24 * 60 * 60,
+          },
+        },
+      },
+    }),
+  ],
+});
+```
+
+Enable Workers Cache only for the named cache entrypoint when the default
+entrypoint should always execute:
 
 ```jsonc
 {
+  "main": "worker/index.ts",
+  "workers_dev": false,
   "cache": {
     "enabled": true,
     "cross_version_cache": true
   },
   "exports": {
     "default": { "type": "worker", "cache": { "enabled": false } },
-    "DataCache": { "type": "worker", "cache": { "enabled": true } }
-  }
+    "VinextDataCache": { "type": "worker", "cache": { "enabled": true } }
+  },
+  "routes": [
+    { "pattern": "app.example.com", "custom_domain": true }
+  ]
 }
 ```
 
-Cross-version caching approximates Runtime Cache persistence across deploys.
-The protocol version is included in every custom key so an incompatible change
-can start with a new namespace.
+The custom domain is required. Cloudflare documents functional Cache API
+operations for Workers deployed to custom domains; a `workers.dev`-only
+deployment is not sufficient for the mailbox protocol. The repository config
+sets `workers_dev` to `false` so a deployment cannot silently expose a broken
+mailbox configuration. Add your own custom-domain route before deploying.
 
-## Run
+`cross_version_cache` is optional. It keeps data warm across deployments, while
+the `/v1/` key namespace prevents incompatible protocol versions from sharing
+entries.
+
+## Invalidation
+
+- Every entry receives a SHA-256 key tag for exact deletion.
+- Hard vinext tags are SHA-256 encoded before becoming `Cache-Tag` values. This
+  preserves case-sensitive vinext tags despite Cloudflare's case-insensitive tag
+  matching and accepts tags that are not header-safe.
+- Path-derived `_N_T_` soft tags cannot be reverse-indexed by Workers Cache. For
+  correctness, path invalidation also purges an app-scoped `vx:data:*` tag,
+  invalidating all data entries for that `appPrefix`.
+- Purges originate from `VinextDataCache`, because Workers Cache purges are
+  scoped to the entrypoint that owns the cached responses.
+- Explicit invalidations are batched into at most 100 tags per purge request,
+  matching Cloudflare's current purge operation limit.
+- Entries accept at most 232 logical tags. With the two internal tags, the
+  hashed `Cache-Tag` value remains within Cloudflare's 16 KiB aggregate limit;
+  the final byte length is validated before publication.
+- `revalidateTag()` profile durations currently use hard invalidation. This is
+  freshness-safe but does not preserve stale entries for profile-based tag SWR.
+
+## Run the demo
 
 ```sh
 npm install
 npm run dev
 ```
 
-Open `http://localhost:8787` to use the interactive Cache Observatory. Its code
-tabs execute read-through, overwrite, key deletion, and tag expiration examples
-and show the internal request trace beside the developer-facing API.
+The local runtime exercises serialization, RPC, and the transient mailbox, but
+does not emulate Workers Cache. The UI reports cache signals as unavailable
+rather than presenting local execution as a real miss. Only the local demo path
+explicitly permits a write without the nonce-free persistence proof. The vinext
+adapter and deployed demo fail closed if `Cf-Cache-Status` is absent.
 
-Workers Cache itself runs at Cloudflare's edge. The UI works locally but clearly
-labels cache behavior as unavailable because the local runtime does not emulate
-Workers Cache. Deploy before evaluating actual HIT, overwrite, tiering, or purge
-behavior:
+To exercise actual Workers Cache behavior, configure a custom domain and deploy:
 
 ```sh
 npm run deploy
 ```
 
-Open the deployed URL and run the read-through sample twice. The second run
-should show `Cf-Cache-Status: HIT`, a new App request ID, and the same stored
-DataCache execution ID. Browser sessions receive hashed key and tag namespaces
-so people using the public demo do not overwrite one another's entries.
+The public demo rate-limits all API requests and applies a stricter shared
+per-location limit to delete/tag invalidation. For an internet-facing production
+deployment, put mutation routes behind Cloudflare Access or Turnstile as well;
+Workers Rate Limiting counters are intentionally permissive and location-local.
+
+## Validation status
+
+Automated tests currently cover:
+
+- every vinext `IncrementalCacheValue` variant and raw binary frames
+- logical revalidation and expiry metadata
+- hard tags, broad path invalidation, and exact key deletion
+- Cache API mailbox fill and digest verification
+- bounded RPC, cached-response, and demo request bodies
+- nonce-free persistence verification and purge batching
+- fail-closed cache-status checks and the 16 KiB tag-header budget
+- `waitUntil()` registration for cache publications
+- the interactive API path using the real handler
+
+Still requiring a deployed edge test:
+
+- Cache API mailbox visibility during the nested Workers Cache miss
+- cold fill and subsequent global/tiered `HIT`
+- forced-revalidation overwrites and persistence across cache tiers
+- concurrent writers and multi-colo reads
+- the full 2 MiB record boundary
 
 ## Code layout
 
-- `src/runtime-cache.ts` is the developer-facing API to read first or extract.
-- `src/data-cache.ts` implements the cache-owning Worker entrypoint.
-- `src/cache-protocol.ts` contains private headers, codecs, validation, and keys.
-- `src/demo-api.ts` maps the executable UI samples to `getCache()` calls.
-- `src/demo-ui.ts` contains the dependency-free interactive UI.
-- `src/index.ts` only composes exports and HTTP routes.
+- `src/workers-cache-handler.ts`: vinext `CacheHandler` and adapter factory
+- `src/cache-types.ts`: exact vinext cache types plus the stored envelope
+- `src/cache-codec.ts`: binary envelope and SHA-256 verification
+- `src/data-cache.ts`: mailbox publication and cache-owning entrypoint
+- `src/cache-protocol.ts`: keys, tags, limits, and private protocol metadata
+- `src/demo-api.ts`: session isolation, validation, and traces
+- `src/demo-ui.ts`: dependency-free interactive UI
 
-## Prototype limits
+## Platform constraints
 
-- The 128 KB request-header limit leaves roughly 90 KB for a JSON value after
-  Base64 encoding and metadata. Larger values need chunking plus a manifest.
-- Values are JSON, and `null` is indistinguishable from a cache miss.
-- Tags are printable ASCII, case-insensitive at purge time, and limited here to
-  128 tags of 256 characters each.
-- A two-phase `get()` then `set()` does not collapse application work on a cold
-  miss. A read-through API computes inside `DataCache` when collapse matters.
-- Writes are not atomic or globally ordered. A fill updates the traversed lower
-  tier and upper tier; other lower tiers can retain an older fresh value.
-- `delete()` and `expireTag()` use globally propagated but rate-limited purges.
-- Cache entries are ephemeral and can be evicted before their freshness TTL.
-
-The key behavior still requiring an edge integration test is that an internal
-request carrying `Cache-Control: no-cache` executes `DataCache` for a warm key
-and replaces it with the returned `200`. This follows RFC 9111 revalidation
-semantics, but Cloudflare's Workers Cache documentation does not yet show this
-exact key/value protocol.
+- Workers Cache is ephemeral and may evict entries before their physical TTL.
+- Explicit purges are global, rate-limited, and not transactional with refill.
+- Concurrent writes have no compare-and-swap or global ordering guarantee.
+- Broad path invalidation favors correctness over cache retention.
+- Cache API is independent of Workers Cache, local to a data center, and not
+  tiered. This implementation uses it only for a random, 60-second mailbox and
+  deletes the entry immediately after publication.

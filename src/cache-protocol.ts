@@ -1,28 +1,52 @@
-export const CACHE_URL = 'https://data-cache.internal/value';
-export const CACHE_KEY_PREFIX = '/__runtime-cache/v1/';
-export const DEFAULT_TTL_SECONDS = 3600;
-export const MAX_TAGS = 128;
-export const MAX_TAG_LENGTH = 256;
-export const MAX_REQUEST_HEADER_BYTES = 120 * 1024;
+export const CACHE_URL = 'https://vinext-data-cache.internal/v1/entry';
+export const CACHE_KEY_PREFIX = '/__vinext-data-cache/v1/';
+export const MAILBOX_CACHE_NAME = 'vinext-data-cache-mailbox-v1';
+export const MAILBOX_URL_PREFIX = 'https://vinext-data-cache-mailbox.internal/v1/';
+export const DEFAULT_STORAGE_TTL_SECONDS = 30 * 24 * 60 * 60;
+export const MAILBOX_TTL_SECONDS = 60;
+export const MAX_TAGS = 232;
+export const MAX_TAG_LENGTH = 1024;
+export const MAX_CACHE_TAG_HEADER_BYTES = 16 * 1024;
+export const MAX_RECORD_BYTES = 2 * 1024 * 1024;
+export const MAX_PURGE_OPERATIONS = 100;
+export const PATH_TAG_PREFIX = '_N_T_';
 
-export const OPERATION_HEADER = 'X-Data-Cache-Operation';
-export const VALUE_HEADER = 'X-Data-Cache-Value';
-export const TAGS_HEADER = 'X-Data-Cache-Tags';
-export const KEY_TAG_HEADER = 'X-Data-Cache-Key-Tag';
-export const TTL_HEADER = 'X-Data-Cache-Ttl';
-export const WRITE_ID_HEADER = 'X-Data-Cache-Write-Id';
-export const EXECUTION_ID_HEADER = 'X-Data-Cache-Execution-Id';
-export const EXECUTED_AT_HEADER = 'X-Data-Cache-Executed-At';
+export const MAILBOX_HEADER = 'X-Vinext-Cache-Mailbox';
+export const TAGS_HEADER = 'X-Vinext-Cache-Tags';
+export const TTL_HEADER = 'X-Vinext-Cache-Ttl';
+export const WRITE_ID_HEADER = 'X-Vinext-Cache-Write-Id';
+export const DIGEST_HEADER = 'X-Vinext-Cache-Digest';
+export const EXECUTION_ID_HEADER = 'X-Vinext-Cache-Execution-Id';
+export const EXECUTED_AT_HEADER = 'X-Vinext-Cache-Executed-At';
 
-export async function cacheIdentity(key: string): Promise<{ cacheKey: string; keyTag: string }> {
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+
+export type CacheIdentity = {
+	cacheKey: string;
+	keyTag: string;
+};
+
+export async function cacheIdentity(key: string, appPrefix = ''): Promise<CacheIdentity> {
 	if (!key) throw new TypeError('Data cache key must not be empty');
-
-	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
-	const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+	const hash = await hashText(`key\0${appPrefix}\0${key}`);
 	return {
 		cacheKey: `${CACHE_KEY_PREFIX}${hash}`,
-		keyTag: `__key:${hash}`,
+		keyTag: `vx:k:${hash}`,
 	};
+}
+
+export async function cacheTag(tag: string, appPrefix = ''): Promise<string> {
+	return `vx:t:${await hashText(`tag\0${appPrefix}\0${tag}`)}`;
+}
+
+export async function cacheNamespaceTag(appPrefix = ''): Promise<string> {
+	return `vx:data:${await hashText(`app\0${appPrefix}`)}`;
+}
+
+export function mailboxRequest(nonce: string): Request {
+	if (!UUID_PATTERN.test(nonce)) throw new TypeError('Invalid data cache mailbox nonce');
+	return new Request(`${MAILBOX_URL_PREFIX}${nonce}`);
 }
 
 export function validateTtl(ttl: number): number {
@@ -33,43 +57,55 @@ export function validateTtl(ttl: number): number {
 }
 
 export function validateTags(tags: string[], maximum = MAX_TAGS): string[] {
-	if (tags.length > maximum) throw new TypeError(`Data cache accepts at most ${maximum} tags`);
-
 	const unique = [...new Set(tags)];
+	if (unique.length > maximum) throw new TypeError(`Data cache accepts at most ${maximum} tags`);
 	for (const tag of unique) {
-		if (!tag || tag.length > MAX_TAG_LENGTH || tag.includes(',') || !/^[!-~]+$/.test(tag)) {
-			throw new TypeError(`Invalid data cache tag: ${tag}`);
+		if (!tag || tag.length > MAX_TAG_LENGTH) throw new TypeError('Data cache tags must contain 1-1024 characters');
+	}
+	return unique;
+}
+
+export function validateCloudflareTags(tags: string[]): string[] {
+	const unique = [...new Set(tags)];
+	if (unique.length > MAX_TAGS + 2) throw new TypeError(`Data cache accepts at most ${MAX_TAGS} logical tags`);
+	for (const tag of unique) {
+		if (!/^[!-~]+$/.test(tag) || tag.includes(',') || tag.length > MAX_TAG_LENGTH) {
+			throw new TypeError('Invalid Workers Cache tag');
 		}
 	}
 	return unique;
 }
 
-export function requiredHeader(request: Request, name: string): string {
-	const value = request.headers.get(name);
+export function validateCacheHeaderTags(tags: string[]): string[] {
+	const validated = validateCloudflareTags(tags);
+	const headerBytes = validated.reduce((total, tag, index) => total + tag.length + (index > 0 ? 1 : 0), 0);
+	if (headerBytes > MAX_CACHE_TAG_HEADER_BYTES) {
+		throw new TypeError(`Data cache Cache-Tag header exceeds ${MAX_CACHE_TAG_HEADER_BYTES} bytes`);
+	}
+	return validated;
+}
+
+export function requiredHeader(headers: Headers, name: string): string {
+	const value = headers.get(name);
 	if (!value) throw new TypeError(`Missing ${name} header`);
 	return value;
 }
 
-export function assertHeaderBudget(headers: Headers): void {
-	let size = 0;
-	headers.forEach((value, name) => {
-		size += new TextEncoder().encode(`${name}: ${value}\r\n`).byteLength;
-	});
-	if (size > MAX_REQUEST_HEADER_BYTES) {
-		throw new RangeError('Serialized data cache value is too large for the prototype');
-	}
+export function validateWriteId(value: string): string {
+	if (!UUID_PATTERN.test(value)) throw new TypeError('Invalid data cache write ID');
+	return value;
 }
 
-export function encodeBase64(value: string): string {
-	const bytes = new TextEncoder().encode(value);
-	let binary = '';
-	for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-		binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-	}
-	return btoa(binary);
+export function validateDigest(value: string): string {
+	if (!SHA256_PATTERN.test(value)) throw new TypeError('Invalid data cache digest');
+	return value;
 }
 
-export function decodeBase64(value: string): Uint8Array {
-	const binary = atob(value);
-	return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+async function hashText(value: string): Promise<string> {
+	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+	return hex(digest);
+}
+
+export function hex(value: ArrayBuffer): string {
+	return Array.from(new Uint8Array(value), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

@@ -4,16 +4,17 @@
   "private": true,
   "scripts": {
     "deploy": "wrangler deploy",
-    "dev": "wrangler dev",
-    "start": "wrangler dev",
+    "dev": "wrangler dev --local",
+    "start": "wrangler dev --local",
     "test": "vitest",
     "cf-typegen": "wrangler types"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.12.4",
+    "@cloudflare/vitest-pool-workers": "^0.18.5",
     "@types/node": "^26.1.1",
     "typescript": "^5.5.2",
-    "vitest": "~3.2.0",
+    "vinext": "^1.0.0-beta.1",
+    "vitest": "^4.1.10",
     "wrangler": "^4.111.0"
   }
 }

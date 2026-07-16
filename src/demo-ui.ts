@@ -4,404 +4,225 @@ export const DEMO_HTML = String.raw`<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Cache Observatory</title>
+  <title>vinext CacheHandler on Workers Cache</title>
   <style>
     :root {
-      --ink: #f4f1e8;
-      --muted: #9da3a0;
-      --dim: #676d6a;
-      --base: #0a0c0b;
-      --panel: #111412;
-      --raised: #171b18;
-      --line: #303630;
-      --acid: #c8ff58;
-      --cyan: #67e8e1;
-      --coral: #ff7c5c;
-      --amber: #ffc45c;
+      --bg: #0d0f0e;
+      --panel: #151816;
+      --line: #343934;
+      --text: #f2f0e9;
+      --muted: #9aa19a;
+      --green: #c9ff63;
+      --blue: #72e6df;
+      --red: #ff8066;
+      --yellow: #ffc96b;
       --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-      --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      --serif: Iowan Old Style, Baskerville, "Times New Roman", serif;
+      --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
     * { box-sizing: border-box; }
-    html { min-width: 320px; background: var(--base); }
-    body {
-      margin: 0;
-      color: var(--ink);
-      background-color: var(--base);
-      background-image: radial-gradient(#252a26 0.8px, transparent 0.8px);
-      background-size: 20px 20px;
-      font-family: var(--sans);
-      min-height: 100vh;
-    }
-
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
     button, input, textarea { font: inherit; }
-    button { color: inherit; }
-    button:focus-visible, input:focus-visible, textarea:focus-visible {
-      outline: 2px solid var(--cyan);
-      outline-offset: 2px;
-    }
+    button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .page { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 30px 0 60px; }
 
-    .shell { width: min(1500px, 100%); margin: 0 auto; padding: 0 28px 64px; }
-    .topbar {
-      height: 70px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--line);
-      background: color-mix(in srgb, var(--base) 92%, transparent);
-    }
-    .brand { display: flex; align-items: center; gap: 12px; font: 700 13px/1 var(--mono); letter-spacing: 0.12em; }
-    .brand-mark { width: 28px; height: 28px; position: relative; border: 1px solid var(--acid); }
-    .brand-mark::before, .brand-mark::after { content: ""; position: absolute; background: var(--acid); }
-    .brand-mark::before { width: 14px; height: 1px; top: 8px; left: 6px; }
-    .brand-mark::after { width: 8px; height: 1px; top: 16px; left: 6px; box-shadow: 5px 4px 0 var(--acid); }
-    .session { display: flex; align-items: center; gap: 10px; color: var(--muted); font: 11px/1 var(--mono); }
-    .session strong { color: var(--cyan); font-weight: 500; }
-    .ghost-button {
-      border: 1px solid var(--line);
-      background: transparent;
-      padding: 8px 11px;
-      cursor: pointer;
-      font: 600 10px/1 var(--mono);
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-    .ghost-button:hover { border-color: var(--cyan); color: var(--cyan); }
+    header { display: flex; justify-content: space-between; gap: 24px; align-items: center; padding-bottom: 28px; border-bottom: 1px solid var(--line); }
+    .title { display: flex; align-items: center; gap: 12px; }
+    .mark { width: 18px; height: 18px; border: 2px solid var(--green); box-shadow: 5px 5px 0 #29301f; }
+    h1 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+    .subtitle { margin: 5px 0 0; color: var(--muted); font: 11px/1.4 var(--mono); }
+    .session { color: var(--muted); font: 10px/1 var(--mono); }
+    .session button { margin-left: 8px; padding: 7px 9px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
+    .session button:hover { color: var(--text); border-color: var(--muted); }
 
-    .hero { padding: 62px 0 38px; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.7fr); gap: 72px; align-items: end; }
-    .eyebrow { margin: 0 0 15px; color: var(--acid); font: 700 11px/1 var(--mono); letter-spacing: 0.18em; text-transform: uppercase; }
-    h1 { margin: 0; max-width: 900px; font: 400 clamp(45px, 6.3vw, 92px)/0.91 var(--serif); letter-spacing: -0.055em; }
-    .hero-copy { color: var(--muted); font-size: 15px; line-height: 1.7; max-width: 470px; }
-    .hero-copy code { color: var(--cyan); font-family: var(--mono); }
-    .local-notice {
-      display: none;
-      margin-top: 18px;
-      border-left: 2px solid var(--amber);
-      padding: 8px 0 8px 14px;
-      color: var(--amber);
-      font: 11px/1.55 var(--mono);
-    }
-    .local-notice.visible { display: block; }
+    .intro { max-width: 700px; padding: 46px 0 32px; }
+    .intro h2 { margin: 0 0 12px; font-size: clamp(31px, 5vw, 52px); line-height: 1.02; letter-spacing: -0.045em; }
+    .intro p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.65; }
+    code { font-family: var(--mono); color: var(--blue); }
+    .notice { display: none; margin-bottom: 20px; padding: 12px 14px; border: 1px solid var(--yellow); color: var(--yellow); font: 11px/1.55 var(--mono); }
+    .notice.visible { display: block; }
 
-    .workspace { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(430px, 0.92fr); border: 1px solid var(--line); background: var(--panel); }
-    .panel { min-width: 0; }
-    .code-panel { border-right: 1px solid var(--line); }
-    .panel-head { min-height: 61px; display: flex; align-items: center; justify-content: space-between; padding: 0 19px; border-bottom: 1px solid var(--line); }
-    .panel-kicker { color: var(--dim); font: 700 10px/1 var(--mono); letter-spacing: 0.13em; text-transform: uppercase; }
-    .source-file { color: var(--cyan); font: 11px/1 var(--mono); }
-    .tabs { display: flex; overflow-x: auto; border-bottom: 1px solid var(--line); }
-    .tab {
-      flex: 1;
-      min-width: 118px;
-      padding: 16px 12px;
-      border: 0;
-      border-right: 1px solid var(--line);
-      background: transparent;
-      color: var(--dim);
-      cursor: pointer;
-      font: 700 11px/1 var(--mono);
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-    }
+    .demo { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(360px, 0.92fr); border: 1px solid var(--line); background: var(--panel); }
+    .code-side { min-width: 0; border-right: 1px solid var(--line); }
+    .result-side { min-width: 0; }
+    .section-head { min-height: 51px; display: flex; justify-content: space-between; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--line); }
+    .section-head strong { font-size: 12px; }
+    .section-head span { color: var(--blue); font: 10px/1 var(--mono); }
+
+    .tabs { display: flex; border-bottom: 1px solid var(--line); }
+    .tab { flex: 1; border: 0; border-right: 1px solid var(--line); padding: 13px 8px; background: transparent; color: var(--muted); cursor: pointer; font: 10px/1 var(--mono); text-transform: uppercase; }
     .tab:last-child { border-right: 0; }
-    .tab:hover { color: var(--ink); }
-    .tab.active { color: var(--base); background: var(--acid); }
+    .tab.active { background: var(--green); color: #11140f; font-weight: 800; }
 
-    .inputs { display: grid; grid-template-columns: 1fr 110px 1fr; border-bottom: 1px solid var(--line); }
-    .field { display: flex; flex-direction: column; gap: 7px; padding: 14px 16px; border-right: 1px solid var(--line); }
-    .field:last-child { border-right: 0; }
-    .field label { color: var(--dim); font: 700 9px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
-    .field input, .value-field textarea {
-      width: 100%;
-      border: 0;
-      background: transparent;
-      color: var(--ink);
-      padding: 0;
-      font: 13px/1.5 var(--mono);
+    .controls { display: grid; grid-template-columns: 1fr 90px 1fr; border-bottom: 1px solid var(--line); }
+    label { display: block; padding: 12px 14px; border-right: 1px solid var(--line); color: var(--muted); font: 9px/1 var(--mono); text-transform: uppercase; }
+    label:last-child { border-right: 0; }
+    input, textarea { width: 100%; margin-top: 8px; padding: 0; border: 0; background: transparent; color: var(--text); font: 12px/1.5 var(--mono); }
+    .value { display: none; padding: 12px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font: 9px/1 var(--mono); text-transform: uppercase; }
+    .value.visible { display: block; }
+    textarea { min-height: 90px; resize: vertical; text-transform: none; }
+
+    .code-head { display: flex; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font: 9px/1 var(--mono); text-transform: uppercase; }
+    .copy { border: 0; background: transparent; color: var(--muted); cursor: pointer; font: inherit; text-transform: uppercase; }
+    .copy:hover { color: var(--blue); }
+    pre { margin: 0; font-family: var(--mono); }
+    #code { min-height: 285px; overflow: auto; padding: 18px; background: #101210; color: #dce1dc; font-size: 12px; line-height: 1.7; white-space: pre; }
+    .actions { display: flex; align-items: center; gap: 8px; min-height: 66px; padding: 11px 14px; border-top: 1px solid var(--line); }
+    .run { min-height: 40px; border: 0; padding: 0 17px; background: var(--green); color: #11140f; cursor: pointer; font: 800 10px/1 var(--mono); text-transform: uppercase; }
+    .run:disabled { opacity: 0.55; cursor: wait; }
+    .modes { display: none; gap: 6px; }
+    .modes.visible { display: flex; }
+    .mode { min-height: 40px; border: 1px solid var(--line); padding: 0 10px; background: transparent; color: var(--muted); cursor: pointer; font: 9px/1 var(--mono); text-transform: uppercase; }
+    .mode.active { color: var(--blue); border-color: var(--blue); }
+    .error { margin-left: auto; color: var(--red); font: 10px/1.4 var(--mono); text-align: right; }
+
+    .status { padding: 23px 18px; border-bottom: 1px solid var(--line); }
+    .status-label { color: var(--muted); font: 9px/1 var(--mono); text-transform: uppercase; }
+    .status h3 { margin: 9px 0 7px; font-size: 29px; letter-spacing: -0.03em; }
+    .status h3.hit { color: var(--green); }
+    .status h3.miss { color: var(--red); }
+    .status h3.running { color: var(--blue); }
+    .status p { min-height: 20px; margin: 0; color: var(--muted); font: 11px/1.5 var(--mono); }
+    .path { padding: 15px 18px; border-bottom: 1px solid var(--line); color: var(--text); font: 11px/1.6 var(--mono); }
+    .facts { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); }
+    .fact { min-height: 72px; padding: 13px 15px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .fact:nth-child(2n) { border-right: 0; }
+    .fact:nth-child(n+3) { border-bottom: 0; }
+    .fact small { display: block; color: var(--muted); font: 8px/1 var(--mono); text-transform: uppercase; }
+    .fact output { display: block; margin-top: 10px; overflow: hidden; text-overflow: ellipsis; color: var(--text); font: 11px/1.3 var(--mono); white-space: nowrap; }
+    .output-title { padding: 11px 15px; border-bottom: 1px solid var(--line); color: var(--muted); font: 9px/1 var(--mono); text-transform: uppercase; }
+    #output { min-height: 133px; max-height: 230px; overflow: auto; padding: 14px 16px; background: #101210; color: #dce1dc; font-size: 10px; line-height: 1.55; white-space: pre-wrap; }
+    .details { padding: 13px 15px; }
+    details { border: 1px solid var(--line); border-bottom: 0; }
+    details:last-child { border-bottom: 1px solid var(--line); }
+    summary { display: flex; justify-content: space-between; gap: 12px; padding: 10px; cursor: pointer; color: var(--muted); font: 9px/1.4 var(--mono); list-style: none; }
+    summary::-webkit-details-marker { display: none; }
+    summary span:last-child { color: var(--blue); }
+    details pre { overflow: auto; max-height: 220px; padding: 11px; border-top: 1px solid var(--line); background: #101210; color: var(--muted); font-size: 9px; line-height: 1.5; }
+    .empty { color: var(--muted); font: 10px/1.5 var(--mono); }
+
+    footer { padding-top: 18px; color: var(--muted); font: 10px/1.5 var(--mono); }
+    @media (max-width: 850px) {
+      .demo { grid-template-columns: 1fr; }
+      .code-side { border-right: 0; border-bottom: 1px solid var(--line); }
     }
-    .field input::placeholder, .value-field textarea::placeholder { color: #4d534f; }
-    .value-field { display: none; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-    .value-field.visible { display: block; }
-    .value-field label { display: block; margin-bottom: 9px; color: var(--dim); font: 700 9px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
-    .value-field textarea { resize: vertical; min-height: 112px; }
-
-    .code-toolbar { height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px 0 18px; background: #0d100e; border-bottom: 1px solid var(--line); }
-    .code-toolbar span { color: var(--dim); font: 10px/1 var(--mono); }
-    .copy-button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font: 10px/1 var(--mono); text-transform: uppercase; }
-    .copy-button:hover { color: var(--cyan); }
-    .code-wrap { min-height: 350px; overflow: auto; background: #0d100e; padding: 17px 0 23px; }
-    .code-line {
-      display: grid;
-      grid-template-columns: 47px 1fr;
-      min-height: 25px;
-      padding: 2px 24px 2px 0;
-      color: #d8ddd8;
-      font: 12.5px/1.65 var(--mono);
-      white-space: pre;
-      transition: background 120ms ease, color 120ms ease;
-    }
-    .code-line::before { content: attr(data-line); padding-right: 13px; color: #444a46; text-align: right; user-select: none; }
-    .code-line.active { color: #fff; background: color-mix(in srgb, var(--cyan) 13%, transparent); box-shadow: inset 2px 0 var(--cyan); }
-    .code-line.complete::before { color: var(--acid); }
-
-    .actions { min-height: 70px; display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--line); }
-    .run-button {
-      min-height: 43px;
-      border: 0;
-      background: var(--acid);
-      color: #10130f;
-      padding: 0 20px;
-      cursor: pointer;
-      font: 800 11px/1 var(--mono);
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-    .run-button:hover { background: #dcff91; }
-    .run-button:disabled { cursor: wait; opacity: 0.55; }
-    .invalidate-actions { display: none; gap: 8px; }
-    .invalidate-actions.visible { display: flex; }
-    .mode-button { height: 43px; border: 1px solid var(--line); background: transparent; padding: 0 13px; cursor: pointer; color: var(--muted); font: 700 10px/1 var(--mono); text-transform: uppercase; }
-    .mode-button.active { color: var(--cyan); border-color: var(--cyan); }
-    .form-error { margin-left: auto; color: var(--coral); font: 11px/1.4 var(--mono); text-align: right; }
-
-    .trace-head { display: flex; align-items: center; justify-content: space-between; padding: 20px; border-bottom: 1px solid var(--line); }
-    .trace-title { margin: 0; font: 400 26px/1 var(--serif); }
-    .status-pill { border: 1px solid var(--line); padding: 7px 9px; color: var(--dim); font: 700 10px/1 var(--mono); letter-spacing: 0.08em; }
-    .status-pill.hit { color: var(--acid); border-color: var(--acid); }
-    .status-pill.miss { color: var(--coral); border-color: var(--coral); }
-    .status-pill.running { color: var(--cyan); border-color: var(--cyan); }
-
-    .flow { padding: 24px 20px 21px; border-bottom: 1px solid var(--line); overflow-x: auto; }
-    .flow-track { min-width: 470px; display: grid; grid-template-columns: 1fr 28px 1fr 28px 1fr 28px 1fr 28px 1fr; align-items: center; }
-    .flow-node { min-height: 75px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--line); padding: 10px; color: var(--dim); background: #0d100e; }
-    .flow-node strong { font: 700 10px/1.3 var(--mono); text-transform: uppercase; }
-    .flow-node small { font: 9px/1.3 var(--mono); }
-    .flow-node.active { color: var(--ink); border-color: var(--cyan); }
-    .flow-node.hit { color: var(--acid); border-color: var(--acid); }
-    .flow-node.miss { color: var(--coral); border-color: var(--coral); }
-    .connector { height: 1px; background: var(--line); position: relative; }
-    .connector::after { content: ""; position: absolute; width: 5px; height: 5px; border-top: 1px solid var(--dim); border-right: 1px solid var(--dim); transform: rotate(45deg); right: 1px; top: -2px; }
-    .connector.active { background: var(--cyan); }
-    .connector.active::after { border-color: var(--cyan); }
-
-    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--line); }
-    .metric { min-height: 82px; padding: 14px 15px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-    .metric:nth-child(3n) { border-right: 0; }
-    .metric:nth-child(n+4) { border-bottom: 0; }
-    .metric label { display: block; color: var(--dim); font: 700 8px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
-    .metric output { display: block; margin-top: 11px; overflow: hidden; color: var(--ink); font: 12px/1.25 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
-
-    .result-block { border-bottom: 1px solid var(--line); }
-    .result-label { padding: 12px 16px; border-bottom: 1px solid var(--line); color: var(--dim); font: 700 9px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
-    .result-json { margin: 0; min-height: 125px; max-height: 235px; overflow: auto; padding: 15px 17px; color: #d8ddd8; background: #0d100e; font: 11px/1.55 var(--mono); white-space: pre-wrap; }
-    .protocol { padding: 0 16px 18px; }
-    .protocol-title { margin: 0; padding: 15px 0 11px; color: var(--dim); font: 700 9px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
-    .protocol-empty { color: var(--dim); font: 11px/1.6 var(--mono); }
-    .trace-item { border: 1px solid var(--line); border-bottom: 0; }
-    .trace-item:last-child { border-bottom: 1px solid var(--line); }
-    .trace-item summary { display: flex; justify-content: space-between; gap: 12px; padding: 11px 12px; cursor: pointer; color: var(--muted); font: 10px/1.4 var(--mono); list-style: none; }
-    .trace-item summary::-webkit-details-marker { display: none; }
-    .trace-item summary span:last-child { color: var(--cyan); }
-    .trace-item pre { margin: 0; overflow: auto; padding: 12px; border-top: 1px solid var(--line); background: #0d100e; color: #b9c0ba; font: 10px/1.5 var(--mono); }
-
-    .history { margin-top: 24px; border: 1px solid var(--line); background: var(--panel); }
-    .history-head { display: flex; align-items: center; justify-content: space-between; min-height: 55px; padding: 0 18px; border-bottom: 1px solid var(--line); }
-    .history-head h2 { margin: 0; font: 400 21px/1 var(--serif); }
-    .history-head span { color: var(--dim); font: 10px/1 var(--mono); }
-    .history-empty { padding: 25px 18px; color: var(--dim); font: 11px/1.5 var(--mono); }
-    .history-row { border-bottom: 1px solid var(--line); }
-    .history-row:last-child { border-bottom: 0; }
-    .history-row summary { display: grid; grid-template-columns: 90px 150px 1fr 90px 90px; gap: 14px; align-items: center; min-height: 47px; padding: 0 18px; cursor: pointer; list-style: none; font: 10px/1 var(--mono); }
-    .history-row summary::-webkit-details-marker { display: none; }
-    .history-row .time, .history-row .meta { color: var(--dim); }
-    .history-row .operation { color: var(--cyan); text-transform: uppercase; }
-    .history-row .key { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .history-row pre { margin: 0; max-height: 300px; overflow: auto; padding: 15px 18px; border-top: 1px solid var(--line); background: #0d100e; color: var(--muted); font: 10px/1.5 var(--mono); }
-
-    @media (max-width: 1040px) {
-      .hero { grid-template-columns: 1fr; gap: 22px; }
-      .workspace { grid-template-columns: 1fr; }
-      .code-panel { border-right: 0; border-bottom: 1px solid var(--line); }
-      .history-row summary { grid-template-columns: 80px 130px 1fr 75px; }
-      .history-row .duration { display: none; }
-    }
-    @media (max-width: 680px) {
-      .shell { padding: 0 12px 35px; }
-      .topbar { height: 58px; }
-      .brand span { display: none; }
-      .session > span:first-child { display: none; }
-      .hero { padding: 42px 2px 28px; }
-      h1 { font-size: clamp(42px, 16vw, 67px); }
-      .inputs { grid-template-columns: 1fr 90px; }
-      .inputs .field:last-child { grid-column: 1 / -1; border-top: 1px solid var(--line); }
-      .inputs .field:nth-child(2) { border-right: 0; }
-      .code-wrap { min-height: 310px; }
-      .code-line { font-size: 11px; grid-template-columns: 38px 1fr; }
-      .actions { align-items: stretch; flex-wrap: wrap; }
-      .run-button { flex: 1; }
-      .form-error { width: 100%; text-align: left; }
-      .metrics { grid-template-columns: repeat(2, 1fr); }
-      .metric:nth-child(3n) { border-right: 1px solid var(--line); }
-      .metric:nth-child(2n) { border-right: 0; }
-      .metric:nth-child(n+4) { border-bottom: 1px solid var(--line); }
-      .metric:nth-child(n+5) { border-bottom: 0; }
-      .history-row summary { grid-template-columns: 75px 1fr 65px; }
-      .history-row .operation { display: none; }
-      .history-row .duration { display: block; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+    @media (max-width: 560px) {
+      .page { width: min(100% - 20px, 1120px); padding-top: 18px; }
+      header { align-items: flex-start; }
+      .subtitle { display: none; }
+      .intro { padding-top: 34px; }
+      .controls { grid-template-columns: 1fr 80px; }
+      .controls label:last-child { grid-column: 1 / -1; border-top: 1px solid var(--line); }
+      .actions { flex-wrap: wrap; }
+      .error { width: 100%; text-align: left; }
     }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <header class="topbar">
-      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Cache Observatory / Workers Cache</span></div>
-      <div class="session"><span>ISOLATED SESSION</span><strong id="session-id">--------</strong><button class="ghost-button" id="reset-session" type="button">Reset</button></div>
+  <div class="page">
+    <header>
+      <div class="title"><span class="mark" aria-hidden="true"></span><div><h1>vinext CacheHandler on Workers Cache</h1><p class="subtitle">Full cache values, binary frames, TTL, and tag invalidation</p></div></div>
+      <div class="session">session <span id="session">--------</span><button id="reset" type="button">new</button></div>
     </header>
 
-    <main>
-      <section class="hero">
-        <div>
-          <p class="eyebrow">Runtime Cache, without storage</p>
-          <h1>Run the code.<br>Watch the cache.</h1>
-        </div>
-        <div class="hero-copy">
-          <p>A Vercel-shaped <code>get</code>/<code>set</code> API backed exclusively by Cloudflare Workers Cache. The app Worker always runs; a hit skips the cached <code>DataCache</code> entrypoint entirely.</p>
-          <div class="local-notice" id="local-notice">LOCAL MODE: Workers Cache is not emulated. API calls execute, but real HIT, overwrite, and purge behavior requires a deployed Worker.</div>
-        </div>
-      </section>
+    <section class="intro">
+      <h2>Run the API. See what the cache did.</h2>
+      <p>The App Worker always runs. On a cache hit, Cloudflare returns the stored vinext record without executing <code>VinextDataCache</code>.</p>
+    </section>
 
-      <section class="workspace" aria-label="Interactive cache demonstration">
-        <article class="panel code-panel">
-          <div class="panel-head"><span class="panel-kicker">Developer-facing API</span><span class="source-file">src/runtime-cache.ts</span></div>
-          <nav class="tabs" aria-label="Code samples">
-            <button class="tab active" type="button" data-tab="read-through">Read-through</button>
-            <button class="tab" type="button" data-tab="overwrite">Overwrite</button>
-            <button class="tab" type="button" data-tab="invalidate">Invalidate</button>
-          </nav>
+    <div class="notice" id="notice">Cache signals are unavailable in local development. This is not a cache miss. Deploy the Worker to exercise the real edge cache.</div>
 
-          <div class="inputs">
-            <div class="field"><label for="cache-key">Cache key</label><input id="cache-key" value="blog" maxlength="512"></div>
-            <div class="field"><label for="cache-ttl">TTL, seconds</label><input id="cache-ttl" type="number" value="60" min="1" step="1"></div>
-            <div class="field"><label for="cache-tags">Tags, comma separated</label><input id="cache-tags" value="blog,posts"></div>
-          </div>
-          <div class="value-field" id="value-field">
-            <label for="cache-value">JSON value supplied to set()</label>
-            <textarea id="cache-value" spellcheck="false">{
-  "message": "written from the observatory",
+    <main class="demo">
+      <section class="code-side">
+        <div class="section-head"><strong>Code</strong><span>src/index.ts</span></div>
+        <nav class="tabs" aria-label="Examples">
+          <button class="tab active" data-tab="read-through" type="button">Read-through</button>
+          <button class="tab" data-tab="overwrite" type="button">Overwrite</button>
+          <button class="tab" data-tab="invalidate" type="button">Invalidate</button>
+        </nav>
+        <div class="controls">
+          <label>Key<input id="key" value="blog" maxlength="512"></label>
+          <label>TTL<input id="ttl" type="number" value="60" min="1"></label>
+          <label>Tags<input id="tags" value="blog,posts"></label>
+        </div>
+        <label class="value" id="value-wrap">JSON value<textarea id="value" spellcheck="false">{
+  "message": "written from the demo",
   "revision": 1
-}</textarea>
+}</textarea></label>
+        <div class="code-head"><span>Executable example</span><button class="copy" id="copy" type="button">copy</button></div>
+        <pre id="code"></pre>
+        <div class="actions">
+          <button class="run" id="run" type="button">Run read-through</button>
+          <div class="modes" id="modes">
+            <button class="mode active" data-mode="delete" type="button">Delete key</button>
+            <button class="mode" data-mode="expire-tag" type="button">Expire tags</button>
           </div>
-
-          <div class="code-toolbar"><span>EXACT CALL SITE</span><button class="copy-button" id="copy-code" type="button">Copy code</button></div>
-          <div class="code-wrap" id="code-lines" aria-label="Executable TypeScript sample"></div>
-
-          <div class="actions">
-            <button class="run-button" id="run-sample" type="button">Run read-through</button>
-            <div class="invalidate-actions" id="invalidate-actions">
-              <button class="mode-button active" type="button" data-mode="delete">Delete key</button>
-              <button class="mode-button" type="button" data-mode="expire-tag">Expire tags</button>
-            </div>
-            <span class="form-error" id="form-error" role="alert"></span>
-          </div>
-        </article>
-
-        <article class="panel trace-panel">
-          <div class="trace-head"><h2 class="trace-title">Live execution trace</h2><span class="status-pill" id="status-pill">READY</span></div>
-          <div class="flow">
-            <div class="flow-track">
-              <div class="flow-node" data-node="browser"><strong>Browser</strong><small>run sample</small></div><span class="connector"></span>
-              <div class="flow-node" data-node="app"><strong>App Worker</strong><small>always runs</small></div><span class="connector"></span>
-              <div class="flow-node" data-node="cache"><strong>Workers Cache</strong><small id="cache-node-status">awaiting call</small></div><span class="connector"></span>
-              <div class="flow-node" data-node="data"><strong>DataCache</strong><small id="data-node-status">cached entrypoint</small></div><span class="connector"></span>
-              <div class="flow-node" data-node="origin"><strong>Origin</strong><small>api.vercel.app</small></div>
-            </div>
-          </div>
-
-          <div class="metrics">
-            <div class="metric"><label>App request</label><output id="metric-request">—</output></div>
-            <div class="metric"><label>Cache status</label><output id="metric-cache">—</output></div>
-            <div class="metric"><label>DataCache execution</label><output id="metric-execution">—</output></div>
-            <div class="metric"><label>Write ID</label><output id="metric-write">—</output></div>
-            <div class="metric"><label>Colo</label><output id="metric-colo">—</output></div>
-            <div class="metric"><label>Total latency</label><output id="metric-duration">—</output></div>
-          </div>
-
-          <div class="result-block"><div class="result-label">Returned value</div><pre class="result-json" id="result-json">Run a code sample to inspect its result.</pre></div>
-          <div class="protocol"><h3 class="protocol-title">Under the hood</h3><div id="protocol-list" class="protocol-empty">Internal GETs, custom keys, revalidation, and RPC purges will appear here.</div></div>
-        </article>
+          <span class="error" id="error" role="alert"></span>
+        </div>
       </section>
 
-      <section class="history">
-        <div class="history-head"><h2>Operation history</h2><span>CLIENT-SIDE / THIS SESSION</span></div>
-        <div id="history-list" class="history-empty">No operations yet.</div>
+      <section class="result-side" aria-live="polite">
+        <div class="section-head"><strong>Result</strong><span id="colo">—</span></div>
+        <div class="status"><span class="status-label">Cache read</span><h3 id="status">Ready</h3><p id="hint">Run an example to inspect the result.</p></div>
+        <div class="path" id="path">App Worker → Workers Cache → VinextDataCache</div>
+        <div class="facts">
+          <div class="fact"><small>VinextDataCache</small><output id="executed">—</output></div>
+          <div class="fact"><small>Write ID</small><output id="write-id">—</output></div>
+          <div class="fact"><small>App request</small><output id="request-id">—</output></div>
+          <div class="fact"><small>Latency</small><output id="latency">—</output></div>
+        </div>
+        <div class="output-title">Returned value</div><pre id="output">No result yet.</pre>
+        <div class="details" id="details"><span class="empty">Internal requests will appear here.</span></div>
       </section>
     </main>
+
+    <footer>Real HIT, overwrite, and purge behavior requires Cloudflare's edge. The local Miniflare runtime does not emulate Workers Cache.</footer>
   </div>
 
   <script>
     (function () {
       'use strict';
 
-      var sessionStorageKey = 'workers-cache-observatory-session';
-      var state = { tab: 'read-through', invalidateMode: 'delete', busy: false, history: [] };
-      var sessionId = getSession();
-      var codeLines = document.getElementById('code-lines');
-      var runButton = document.getElementById('run-sample');
-      var valueField = document.getElementById('value-field');
-      var invalidateActions = document.getElementById('invalidate-actions');
-      var formError = document.getElementById('form-error');
-      var statusPill = document.getElementById('status-pill');
+      var storageKey = 'workers-cache-demo-session';
+      var state = { tab: 'read-through', mode: 'delete', busy: false };
+      var sessionId = loadSession();
+      var code = document.getElementById('code');
+      var run = document.getElementById('run');
+      var error = document.getElementById('error');
 
-      document.getElementById('session-id').textContent = sessionId.slice(0, 8);
-      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-        document.getElementById('local-notice').classList.add('visible');
-      }
-
+      document.getElementById('session').textContent = sessionId.slice(0, 8);
       document.querySelectorAll('[data-tab]').forEach(function (button) {
         button.addEventListener('click', function () {
           if (state.busy) return;
           state.tab = button.getAttribute('data-tab');
           document.querySelectorAll('[data-tab]').forEach(function (item) { item.classList.toggle('active', item === button); });
-          renderSample();
+          render();
         });
       });
-
       document.querySelectorAll('[data-mode]').forEach(function (button) {
         button.addEventListener('click', function () {
-          if (state.busy) return;
-          state.invalidateMode = button.getAttribute('data-mode');
+          state.mode = button.getAttribute('data-mode');
           document.querySelectorAll('[data-mode]').forEach(function (item) { item.classList.toggle('active', item === button); });
-          renderSample();
+          renderCode();
         });
       });
-
-      ['cache-key', 'cache-ttl', 'cache-tags'].forEach(function (id) {
-        document.getElementById(id).addEventListener('input', renderCode);
-      });
-
-      runButton.addEventListener('click', runSample);
-      document.getElementById('copy-code').addEventListener('click', copyCode);
-      document.getElementById('reset-session').addEventListener('click', function () {
+      ['key', 'ttl', 'tags'].forEach(function (id) { document.getElementById(id).addEventListener('input', renderCode); });
+      document.getElementById('copy').addEventListener('click', copyCode);
+      document.getElementById('reset').addEventListener('click', function () {
         sessionId = createSession();
-        localStorage.setItem(sessionStorageKey, sessionId);
-        state.history = [];
-        document.getElementById('session-id').textContent = sessionId.slice(0, 8);
-        renderHistory();
-        resetTrace();
+        localStorage.setItem(storageKey, sessionId);
+        document.getElementById('session').textContent = sessionId.slice(0, 8);
+        resetResult();
       });
+      run.addEventListener('click', execute);
+      render();
 
-      renderSample();
-
-      function getSession() {
-        var existing = localStorage.getItem(sessionStorageKey);
-        if (existing && /^[A-Za-z0-9_-]{8,80}$/.test(existing)) return existing;
-        var created = createSession();
-        localStorage.setItem(sessionStorageKey, created);
-        return created;
+      function loadSession() {
+        var saved = localStorage.getItem(storageKey);
+        if (saved && /^[A-Za-z0-9_-]{8,80}$/.test(saved)) return saved;
+        var value = createSession();
+        localStorage.setItem(storageKey, value);
+        return value;
       }
 
       function createSession() {
@@ -411,275 +232,192 @@ export const DEMO_HTML = String.raw`<!doctype html>
         return Array.from(bytes, function (byte) { return byte.toString(16).padStart(2, '0'); }).join('');
       }
 
-      function readInputs(includeValue) {
-        var key = document.getElementById('cache-key').value;
-        var ttl = Number(document.getElementById('cache-ttl').value);
-        var tags = document.getElementById('cache-tags').value.split(',').map(function (tag) { return tag.trim(); }).filter(Boolean);
-        if (!key) throw new Error('Enter a cache key.');
+      function inputs(includeValue) {
+        var key = document.getElementById('key').value;
+        var ttl = Number(document.getElementById('ttl').value);
+        var tags = document.getElementById('tags').value.split(',').map(function (tag) { return tag.trim(); }).filter(Boolean);
+        if (!key) throw new Error('Enter a key.');
         if (!Number.isSafeInteger(ttl) || ttl <= 0) throw new Error('TTL must be a positive integer.');
-        var payload = { sessionId: sessionId, key: key, ttl: ttl, tags: tags };
-        if (includeValue) payload.value = JSON.parse(document.getElementById('cache-value').value);
-        return payload;
+        var result = { sessionId: sessionId, key: key, ttl: ttl, tags: tags };
+        if (includeValue) result.value = JSON.parse(document.getElementById('value').value);
+        return result;
       }
 
-      function renderSample() {
-        valueField.classList.toggle('visible', state.tab === 'overwrite');
-        invalidateActions.classList.toggle('visible', state.tab === 'invalidate');
-        runButton.textContent = state.tab === 'read-through' ? 'Run read-through' : state.tab === 'overwrite' ? 'Run overwrite' : 'Run invalidation';
+      function render() {
+        document.getElementById('value-wrap').classList.toggle('visible', state.tab === 'overwrite');
+        document.getElementById('modes').classList.toggle('visible', state.tab === 'invalidate');
+        run.textContent = state.tab === 'read-through' ? 'Run read-through' : state.tab === 'overwrite' ? 'Run overwrite' : 'Run invalidation';
         renderCode();
       }
 
-      function codeForCurrentSample() {
-        var key = quote(document.getElementById('cache-key').value || 'blog');
-        var ttl = document.getElementById('cache-ttl').value || '60';
-        var tags = document.getElementById('cache-tags').value.split(',').map(function (tag) { return tag.trim(); }).filter(Boolean).map(quote).join(', ');
-        var prelude = ['const cache = getCache(ctx.exports.DataCache);', ''];
+      function renderCode() { code.textContent = sample().join('\n'); }
 
-        if (state.tab === 'read-through') {
-          return prelude.concat([
-            'let posts = await cache.get<BlogPost[]>(' + key + ');',
-            '',
-            'if (posts === null) {',
-            '  posts = await fetchBlogPosts();',
-            '  await cache.set(' + key + ', posts, {',
-            '    ttl: ' + ttl + ',',
-            '    tags: [' + tags + '],',
-            '  });',
-            '}',
-          ]);
-        }
-
-        if (state.tab === 'overwrite') {
-          return prelude.concat([
-            'const value = /* JSON from the editor */;',
-            '',
-            'await cache.set(' + key + ', value, {',
-            '  ttl: ' + ttl + ',',
-            '  tags: [' + tags + '],',
-            '});',
-            '',
-            'const cached = await cache.get(' + key + ');',
-          ]);
-        }
-
-        if (state.invalidateMode === 'expire-tag') {
-          return prelude.concat([
-            'await cache.expireTag([' + tags + ']);',
-            '',
-            'const afterExpiration = await cache.get(' + key + ');',
-            '// afterExpiration === null',
-          ]);
-        }
-
-        return prelude.concat([
-          'await cache.delete(' + key + ');',
+      function sample() {
+        var key = quote(document.getElementById('key').value || 'blog');
+        var ttl = document.getElementById('ttl').value || '60';
+        var tags = document.getElementById('tags').value.split(',').map(function (tag) { return tag.trim(); }).filter(Boolean).map(quote).join(', ');
+        var first = ['const cache = new WorkersCacheHandler(', '  ctx.exports.VinextDataCache,', ');', ''];
+        if (state.tab === 'read-through') return first.concat([
+          'const cached = await cache.get(' + key + ');',
+          'let posts = cached?.value?.kind === "FETCH"',
+          '  ? JSON.parse(cached.value.data.body)',
+          '  : null;',
+          'if (posts === null) {',
+          '  posts = await fetchBlogPosts();',
+          '  await cache.set(' + key + ', toFetchValue(posts), {',
+          '    revalidate: ' + ttl + ', tags: [' + tags + '],',
+          '  });',
+          '}',
+        ]);
+        if (state.tab === 'overwrite') return first.concat([
+          'await cache.set(' + key + ', toFetchValue(value), {',
+          '  revalidate: ' + ttl + ', tags: [' + tags + '],',
+          '});',
           '',
-          'const afterDelete = await cache.get(' + key + ');',
-          '// afterDelete === null',
+          'const cached = await cache.get(' + key + ');',
+        ]);
+        if (state.mode === 'expire-tag') return first.concat([
+          'await cache.revalidateTag([' + tags + ']);',
+        ]);
+        return first.concat([
+          'await cache.delete(' + key + ');',
         ]);
       }
 
-      function quote(value) {
-        return "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
-      }
-
-      function renderCode() {
-        codeLines.replaceChildren();
-        codeForCurrentSample().forEach(function (text, index) {
-          var line = document.createElement('div');
-          line.className = 'code-line';
-          line.setAttribute('data-line', String(index + 1));
-          line.textContent = text || ' ';
-          codeLines.appendChild(line);
-        });
-      }
+      function quote(value) { return "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"; }
 
       async function copyCode() {
-        var button = document.getElementById('copy-code');
-        try {
-          await navigator.clipboard.writeText(codeForCurrentSample().join('\n'));
-          button.textContent = 'Copied';
-        } catch (_) {
-          button.textContent = 'Copy failed';
-        }
-        setTimeout(function () { button.textContent = 'Copy code'; }, 1200);
+        var button = document.getElementById('copy');
+        try { await navigator.clipboard.writeText(sample().join('\n')); button.textContent = 'copied'; }
+        catch (_) { button.textContent = 'failed'; }
+        setTimeout(function () { button.textContent = 'copy'; }, 1000);
       }
 
-      async function runSample() {
+      async function execute() {
         if (state.busy) return;
-        formError.textContent = '';
+        error.textContent = '';
         var payload;
-        try {
-          payload = readInputs(state.tab === 'overwrite');
-        } catch (error) {
-          formError.textContent = error instanceof Error ? error.message : String(error);
-          return;
-        }
+        try { payload = inputs(state.tab === 'overwrite'); }
+        catch (problem) { error.textContent = problem instanceof Error ? problem.message : String(problem); return; }
 
         state.busy = true;
-        runButton.disabled = true;
-        statusPill.className = 'status-pill running';
-        statusPill.textContent = 'RUNNING';
-        beginFlow();
-
-        var operation = state.tab === 'invalidate' ? state.invalidateMode : state.tab;
-        var requestPromise = fetch('/api/demo/' + operation, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-
+        run.disabled = true;
+        setStatus('Running…', 'running', 'Calling the App Worker.');
+        var operation = state.tab === 'invalidate' ? state.mode : state.tab;
         try {
-          await animateCode();
-          var response = await requestPromise;
-          var data = await response.json();
-          if (!response.ok) throw new Error(data.error || 'Request failed with ' + response.status);
-          renderResult(data);
-          state.history.unshift(data);
-          state.history = state.history.slice(0, 12);
-          renderHistory();
-        } catch (error) {
-          formError.textContent = error instanceof Error ? error.message : String(error);
-          statusPill.className = 'status-pill miss';
-          statusPill.textContent = 'ERROR';
+          var response = await fetch('/api/demo/' + operation, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          var responseText = await response.text();
+          var result;
+          try { result = JSON.parse(responseText); }
+          catch (_) { throw new Error('Request failed with ' + response.status + ': ' + responseText.slice(0, 160)); }
+          if (!response.ok) throw new Error(result.error || 'Request failed with ' + response.status);
+          showResult(result);
+        } catch (problem) {
+          var message = problem instanceof Error ? problem.message : String(problem);
+          error.textContent = message;
+          if (message.includes('Workers Cache is not enabled')) document.getElementById('notice').classList.add('visible');
+          setStatus('Error', 'miss', message);
         } finally {
           state.busy = false;
-          runButton.disabled = false;
+          run.disabled = false;
         }
       }
 
-      async function animateCode() {
-        var lines = Array.from(codeLines.children).filter(function (line) { return line.textContent.trim(); });
-        for (var index = 0; index < lines.length; index++) {
-          lines.forEach(function (line) { line.classList.remove('active'); });
-          lines[index].classList.add('active');
-          if (index > 0) lines[index - 1].classList.add('complete');
-          await delay(window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 85);
-        }
-        lines.forEach(function (line) { line.classList.remove('active'); line.classList.add('complete'); });
+      function showResult(result) {
+        var traces = result.traces || [];
+        var read = findLast(traces, function (trace) { return trace.operation === 'get'; });
+        var signal = read || findLast(traces, function (trace) { return Boolean(trace.cacheStatus); });
+        var hasCacheSignal = traces.some(function (trace) { return Boolean(trace.cacheStatus); });
+        var unavailable = !hasCacheSignal && traces.some(function (trace) { return trace.request.method === 'GET'; });
+        var status = unavailable
+          ? 'Unavailable'
+          : read
+            ? read.outcome.toUpperCase()
+            : signal && signal.cacheStatus
+              ? signal.cacheStatus
+              : signal ? signal.outcome.toUpperCase() : 'PURGED';
+        var hit = hasCacheSignal && read && read.outcome === 'hit';
+        var dataCacheRan = traces.some(function (trace) { return trace.dataCacheExecuted; });
+        var write = findLast(traces, function (trace) { return Boolean(trace.writeId); });
+
+        if (unavailable) document.getElementById('notice').classList.add('visible');
+        setStatus(status, unavailable ? '' : hit ? 'hit' : 'miss', unavailable
+          ? 'No edge cache signal was returned. This is not a real cache miss.'
+          : hit ? 'The App Worker ran. VinextDataCache was skipped for the read.'
+          : result.source === 'origin' ? 'Run the same sample again; the next read should be a HIT.'
+          : result.source === 'purge' ? 'Purge accepted. Global propagation can take a moment.'
+          : 'The operation reached VinextDataCache.');
+        document.getElementById('path').textContent = unavailable
+          ? 'App Worker → cache unavailable in this runtime'
+          : 'App Worker → Workers Cache ' + status + ' → VinextDataCache ' + (dataCacheRan ? 'executed' : 'skipped');
+        document.getElementById('executed').textContent = dataCacheRan ? 'executed' : 'skipped';
+        document.getElementById('write-id').textContent = write ? short(write.writeId) : '—';
+        document.getElementById('request-id').textContent = short(result.requestId);
+        document.getElementById('latency').textContent = result.durationMs + ' ms';
+        document.getElementById('colo').textContent = result.colo;
+        document.getElementById('output').textContent = JSON.stringify(result.value, null, 2);
+        renderDetails(traces, unavailable);
       }
 
-      function delay(milliseconds) { return new Promise(function (resolve) { setTimeout(resolve, milliseconds); }); }
-
-      function beginFlow() {
-        document.querySelectorAll('.flow-node').forEach(function (node) { node.className = 'flow-node'; });
-        document.querySelectorAll('.connector').forEach(function (connector) { connector.classList.add('active'); });
-        document.querySelector('[data-node="browser"]').classList.add('active');
-        document.querySelector('[data-node="app"]').classList.add('active');
-        document.getElementById('cache-node-status').textContent = 'lookup in progress';
-        document.getElementById('data-node-status').textContent = 'waiting';
-      }
-
-      function renderResult(data) {
-        var traces = data.traces || [];
-        var readTrace = findLast(traces, function (trace) { return trace.operation === 'get'; });
-        var responseTrace = readTrace || findLast(traces, function (trace) { return Boolean(trace.cacheStatus); });
-        var executionTrace = findLast(traces, function (trace) { return Boolean(trace.dataCacheExecutionId); });
-        var writeTrace = findLast(traces, function (trace) { return Boolean(trace.writeId); });
-        var cacheLabel = responseTrace && responseTrace.cacheStatus ? responseTrace.cacheStatus : responseTrace ? responseTrace.outcome.toUpperCase() : 'RPC PURGE';
-        var isHit = readTrace && readTrace.outcome === 'hit';
-
-        statusPill.className = 'status-pill ' + (isHit ? 'hit' : 'miss');
-        statusPill.textContent = cacheLabel;
-        document.getElementById('metric-request').textContent = shortId(data.requestId);
-        document.getElementById('metric-cache').textContent = cacheLabel;
-        document.getElementById('metric-execution').textContent = executionTrace ? shortId(executionTrace.dataCacheExecutionId) : 'skipped';
-        document.getElementById('metric-write').textContent = writeTrace ? shortId(writeTrace.writeId) : '—';
-        document.getElementById('metric-colo').textContent = data.colo;
-        document.getElementById('metric-duration').textContent = data.durationMs + ' ms';
-        document.getElementById('result-json').textContent = JSON.stringify(data.value, null, 2);
-
-        var cacheNode = document.querySelector('[data-node="cache"]');
-        cacheNode.className = 'flow-node ' + (isHit ? 'hit' : 'miss');
-        document.getElementById('cache-node-status').textContent = cacheLabel;
-        document.querySelector('[data-node="browser"]').classList.add('active');
-        document.querySelector('[data-node="app"]').classList.add('active');
-
-        var dataExecuted = traces.some(function (trace) { return trace.dataCacheExecuted; });
-        var dataNode = document.querySelector('[data-node="data"]');
-        dataNode.className = 'flow-node' + (dataExecuted ? ' active' : '');
-        document.getElementById('data-node-status').textContent = dataExecuted ? 'executed' : 'skipped on hit';
-        document.querySelector('[data-node="origin"]').className = 'flow-node' + (data.source === 'origin' ? ' active' : '');
-        renderProtocol(traces);
-      }
-
-      function renderProtocol(traces) {
-        var list = document.getElementById('protocol-list');
-        list.className = '';
-        list.replaceChildren();
+      function renderDetails(traces, unavailable) {
+        var root = document.getElementById('details');
+        root.replaceChildren();
         traces.forEach(function (trace, index) {
           var details = document.createElement('details');
-          details.className = 'trace-item';
           if (index === 0) details.open = true;
           var summary = document.createElement('summary');
-          var title = document.createElement('span');
-          title.textContent = String(index + 1).padStart(2, '0') + '  ' + trace.request.method + '  ' + trace.operation;
+          var name = document.createElement('span');
+          name.textContent = trace.request.method + ' · ' + trace.operation;
           var outcome = document.createElement('span');
-          outcome.textContent = trace.cacheStatus || trace.outcome.toUpperCase();
-          summary.append(title, outcome);
+          outcome.textContent = unavailable && trace.request.method === 'GET' ? 'UNAVAILABLE' : trace.cacheStatus || trace.outcome.toUpperCase();
           var pre = document.createElement('pre');
           pre.textContent = JSON.stringify(trace, null, 2);
+          summary.append(name, outcome);
           details.append(summary, pre);
-          list.appendChild(details);
+          root.appendChild(details);
         });
       }
 
-      function renderHistory() {
-        var list = document.getElementById('history-list');
-        if (state.history.length === 0) {
-          list.className = 'history-empty';
-          list.textContent = 'No operations yet.';
-          return;
-        }
-
-        list.className = '';
-        list.replaceChildren();
-        state.history.forEach(function (item) {
-          var details = document.createElement('details');
-          details.className = 'history-row';
-          var summary = document.createElement('summary');
-          var time = document.createElement('span');
-          time.className = 'time';
-          time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          var operation = document.createElement('span');
-          operation.className = 'operation';
-          operation.textContent = item.operation;
-          var key = document.createElement('span');
-          key.className = 'key';
-          key.textContent = item.key;
-          var meta = document.createElement('span');
-          meta.className = 'meta';
-          meta.textContent = item.colo;
-          var duration = document.createElement('span');
-          duration.className = 'meta duration';
-          duration.textContent = item.durationMs + ' ms';
-          summary.append(time, operation, key, meta, duration);
-          var pre = document.createElement('pre');
-          pre.textContent = JSON.stringify(item, null, 2);
-          details.append(summary, pre);
-          list.appendChild(details);
-        });
+      function setStatus(text, className, hint) {
+        var status = document.getElementById('status');
+        status.textContent = text;
+        status.className = className;
+        document.getElementById('hint').textContent = hint;
       }
 
-      function resetTrace() {
-        statusPill.className = 'status-pill';
-        statusPill.textContent = 'READY';
-        document.querySelectorAll('.flow-node').forEach(function (node) { node.className = 'flow-node'; });
-        document.querySelectorAll('.connector').forEach(function (connector) { connector.classList.remove('active'); });
-        ['metric-request', 'metric-cache', 'metric-execution', 'metric-write', 'metric-colo', 'metric-duration'].forEach(function (id) { document.getElementById(id).textContent = '—'; });
-        document.getElementById('result-json').textContent = 'Run a code sample to inspect its result.';
-        var protocol = document.getElementById('protocol-list');
-        protocol.className = 'protocol-empty';
-        protocol.textContent = 'Internal GETs, custom keys, revalidation, and RPC purges will appear here.';
+      function resetResult() {
+        setStatus('Ready', '', 'Run an example to inspect the result.');
+        document.getElementById('path').textContent = 'App Worker → Workers Cache → VinextDataCache';
+        ['executed', 'write-id', 'request-id', 'latency'].forEach(function (id) { document.getElementById(id).textContent = '—'; });
+        document.getElementById('colo').textContent = '—';
+        document.getElementById('output').textContent = 'No result yet.';
+        var root = document.getElementById('details');
+        root.innerHTML = '<span class="empty">Internal requests will appear here.</span>';
       }
 
       function findLast(items, predicate) {
         for (var index = items.length - 1; index >= 0; index--) if (predicate(items[index])) return items[index];
         return undefined;
       }
-
-      function shortId(value) { return value ? value.slice(0, 8) : '—'; }
+      function short(value) { return value ? value.slice(0, 8) : '—'; }
     })();
   </script>
 </body>
 </html>`;
+
+export function demoPage(): Response {
+	return new Response(DEMO_HTML, {
+		headers: {
+			'Cache-Control': 'no-store',
+			'Content-Security-Policy':
+				"default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+			'Content-Type': 'text/html; charset=utf-8',
+			'Referrer-Policy': 'no-referrer',
+			'X-Content-Type-Options': 'nosniff',
+		},
+	});
+}

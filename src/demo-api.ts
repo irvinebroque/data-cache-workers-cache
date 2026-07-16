@@ -1,13 +1,28 @@
 import { validateTags, validateTtl } from './cache-protocol';
-import {
-	getCache,
-	type DataCacheStub,
-	type JsonValue,
-	type RuntimeCacheTrace,
-} from './runtime-cache';
+import type { VinextDataCacheStub, WorkersCacheTrace } from './workers-cache-handler';
 
-const BLOG_API = 'https://api.vercel.app/blog';
 const MAX_DEMO_REQUEST_BYTES = 128 * 1024;
+
+export type DemoOperation = 'read-through' | 'overwrite' | 'delete' | 'expire-tag';
+
+export type DemoExecution = {
+	entrypoint: VinextDataCacheStub;
+	operation: DemoOperation;
+	key: string;
+	tags: string[];
+	ttl: number;
+	value?: JsonValue;
+	hasValue: boolean;
+	allowUnverifiedLocalWrites: boolean;
+	onTrace(trace: WorkersCacheTrace): void;
+};
+
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+export type DemoExecutionResult = {
+	source: 'cache' | 'origin' | 'write' | 'purge';
+	value: JsonValue;
+};
 
 type DemoInput = {
 	sessionId: string;
@@ -20,21 +35,38 @@ type DemoInput = {
 
 export async function handleDemoApi(
 	request: Request,
-	entrypoint: DataCacheStub,
-	operation: string,
+	entrypoint: VinextDataCacheStub,
+	operation: DemoOperation,
+	execute: (input: DemoExecution) => Promise<DemoExecutionResult>,
 ): Promise<Response> {
 	const startedAt = performance.now();
 	const requestId = crypto.randomUUID();
+	let input: DemoInput;
 
 	try {
-		const input = await readDemoInput(request);
+		input = await readDemoInput(request);
+		if (operation === 'overwrite' && !input.hasValue) throw new TypeError('A JSON value is required');
+		if (operation === 'expire-tag' && input.tags.length === 0) throw new TypeError('At least one tag is required');
+	} catch (error) {
+		return demoError(requestId, error, 400);
+	}
+
+	try {
 		const namespace = (await sha256(input.sessionId)).slice(0, 16);
 		const keyPrefix = `demo:${namespace}:`;
 		const tagPrefix = `demo:${namespace}:`;
 		const internalKey = `${keyPrefix}${input.key}`;
 		const internalTags = validateTags(input.tags.map((tag) => `${tagPrefix}${tag}`));
-		const traces: RuntimeCacheTrace[] = [];
-		const cache = getCache(entrypoint, {
+		const traces: WorkersCacheTrace[] = [];
+		const { source, value } = await execute({
+			entrypoint,
+			operation,
+			key: internalKey,
+			tags: internalTags,
+			ttl: input.ttl,
+			value: input.value,
+			hasValue: input.hasValue,
+			allowUnverifiedLocalWrites: request.cf === undefined,
 			onTrace(trace) {
 				traces.push({
 					...trace,
@@ -43,51 +75,6 @@ export async function handleDemoApi(
 				});
 			},
 		});
-
-		let source: 'cache' | 'origin' | 'write' | 'purge';
-		let value: JsonValue;
-
-		switch (operation) {
-			case 'read-through': {
-				const cached = await cache.get<JsonValue>(internalKey);
-				if (cached !== null) {
-					source = 'cache';
-					value = cached;
-					break;
-				}
-
-				const upstream = await fetch(BLOG_API);
-				if (!upstream.ok) throw new Error(`Blog API failed with ${upstream.status}`);
-
-				value = await upstream.json<JsonValue>();
-				await cache.set(internalKey, value, { ttl: input.ttl, tags: internalTags });
-				source = 'origin';
-				break;
-			}
-			case 'overwrite': {
-				if (!input.hasValue) throw new TypeError('A JSON value is required for overwrite');
-				await cache.set(internalKey, input.value!, { ttl: input.ttl, tags: internalTags });
-				const readBack = await cache.get<JsonValue>(internalKey);
-				value = { written: input.value!, readBack };
-				source = 'write';
-				break;
-			}
-			case 'delete': {
-				await cache.delete(internalKey);
-				value = { afterDelete: await cache.get<JsonValue>(internalKey) };
-				source = 'purge';
-				break;
-			}
-			case 'expire-tag': {
-				if (internalTags.length === 0) throw new TypeError('At least one tag is required');
-				await cache.expireTag(internalTags);
-				value = { afterExpiration: await cache.get<JsonValue>(internalKey) };
-				source = 'purge';
-				break;
-			}
-			default:
-				return new Response('Not found', { status: 404 });
-		}
 
 		return Response.json(
 			{
@@ -105,25 +92,22 @@ export async function handleDemoApi(
 			{ headers: { 'Cache-Control': 'no-store' } },
 		);
 	} catch (error) {
-		const clientError = error instanceof TypeError || error instanceof RangeError || error instanceof SyntaxError;
-		return Response.json(
-			{
-				requestId,
-				error: error instanceof Error ? error.message : String(error),
-			},
-			{ status: clientError ? 400 : 502, headers: { 'Cache-Control': 'no-store' } },
-		);
+		return demoError(requestId, error, 502);
 	}
 }
 
-async function readDemoInput(request: Request): Promise<DemoInput> {
-	const contentLength = Number(request.headers.get('Content-Length') ?? 0);
-	if (contentLength > MAX_DEMO_REQUEST_BYTES) throw new RangeError('Demo request is too large');
+function demoError(requestId: string, error: unknown, status: number): Response {
+	return Response.json(
+		{
+			requestId,
+			error: error instanceof Error ? error.message : String(error),
+		},
+		{ status, headers: { 'Cache-Control': 'no-store' } },
+	);
+}
 
-	const body = await request.text();
-	if (new TextEncoder().encode(body).byteLength > MAX_DEMO_REQUEST_BYTES) {
-		throw new RangeError('Demo request is too large');
-	}
+async function readDemoInput(request: Request): Promise<DemoInput> {
+	const body = await readBoundedRequestBody(request);
 
 	const parsed: unknown = JSON.parse(body);
 	if (!isRecord(parsed)) throw new TypeError('Expected a JSON object');
@@ -139,7 +123,8 @@ async function readDemoInput(request: Request): Promise<DemoInput> {
 	if (typeof parsed.ttl !== 'number') throw new TypeError('TTL must be a number');
 
 	const ttl = validateTtl(parsed.ttl);
-	const tags = validateTags(parsed.tags);
+	const tags = validateTags(parsed.tags, 10);
+	if (tags.some((tag) => tag.length > 1000)) throw new TypeError('Demo tags must not exceed 1000 characters');
 	const hasValue = Object.hasOwn(parsed, 'value');
 	if (hasValue && !isJsonValue(parsed.value)) throw new TypeError('Value must be valid JSON');
 
@@ -151,6 +136,48 @@ async function readDemoInput(request: Request): Promise<DemoInput> {
 		value: parsed.value as JsonValue | undefined,
 		hasValue,
 	};
+}
+
+async function readBoundedRequestBody(request: Request): Promise<string> {
+	const contentLength = request.headers.get('Content-Length');
+	if (contentLength !== null) {
+		if (!/^\d+$/.test(contentLength)) throw new TypeError('Invalid Content-Length');
+		const declaredLength = Number(contentLength);
+		if (!Number.isSafeInteger(declaredLength) || declaredLength > MAX_DEMO_REQUEST_BYTES) {
+			throw new RangeError('Demo request is too large');
+		}
+	}
+	if (!request.body) return '';
+
+	const reader = request.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let byteLength = 0;
+	let completed = false;
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			byteLength += value.byteLength;
+			if (byteLength > MAX_DEMO_REQUEST_BYTES) throw new RangeError('Demo request is too large');
+			chunks.push(value);
+		}
+		completed = true;
+	} finally {
+		if (!completed) {
+			try {
+				await reader.cancel();
+			} catch {}
+		}
+		reader.releaseLock();
+	}
+
+	const body = new Uint8Array(byteLength);
+	let offset = 0;
+	for (const chunk of chunks) {
+		body.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return new TextDecoder().decode(body);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
