@@ -14,7 +14,7 @@
     "@types/node": "^26.1.1",
     "typescript": "^5.5.2",
     "vinext": "^1.0.0-beta.1",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.11",
     "wrangler": "^4.111.0"
   }
 }
